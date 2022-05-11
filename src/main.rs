@@ -20,20 +20,12 @@ fn main() -> Result<()> {
         ftdi::Parity::None,
     )?;
     device.usb_purge_buffers()?;
-    device.set_write_chunksize(64);
-    device.set_read_chunksize(64);
     device.set_baud_rate(3_000_000)?;
-    device.set_latency_timer(2)?;
+    device.set_latency_timer(1)?;
     device.set_flow_control(ftdi::FlowControl::RtsCts)?;
     device.set_bitmode(0xFF, ftdi::BitMode::Reset)?;
 
-    let result = unsafe {
-        // Not sure if this is needed!
-        (*device.libftdi_context()).usb_read_timeout = 1000;
-        (*device.libftdi_context()).usb_write_timeout = 1000;
-        ffi::ftdi_setdtr_rts(device.libftdi_context(), 1, 1)
-    };
-    if result != 0 {
+    if unsafe { ffi::ftdi_setdtr_rts(device.libftdi_context(), 1, 1) } != 0 {
         bail!("Could not set DTR / RTS");
     }
 
@@ -55,6 +47,7 @@ fn main() -> Result<()> {
     for (i, chunk) in data.chunks(1024).enumerate() {
         if i % 100 == 0 {
             print!(" Sending {}/{}\r", i, (data.len() + 1023) / 1024);
+            std::io::stdout().flush()?;
         }
 
         let packet_num = (i + 1) as u8;
@@ -71,6 +64,7 @@ fn main() -> Result<()> {
         packet.push(crc as u8);
 
         device.write_all(&packet)?;
+        device.flush()?;
 
         let mut ack = [0u8];
         let mut okay = false;
@@ -86,7 +80,7 @@ fn main() -> Result<()> {
             }
         }
         if !okay {
-            bail!("Missed NAK");
+            bail!("Missed ACK");
         }
     }
     device.write_all(&[EOT])?;
