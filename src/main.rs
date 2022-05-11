@@ -35,13 +35,13 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("Missing filename"))?;
     let data = std::fs::read(filename)?;
 
-    let timeout = Instant::now() + Duration::new(30, 0);
+    let timeout = Instant::now() + Duration::from_secs(30);
     loop {
         let mut c = [0u8];
         if device.read_exact(&mut c).is_ok() {
-            match c[0] as char {
-                'C' => break,
-                x => bail!("Invalid start char '{}'", x),
+            match c[0] {
+                b'C' => break,
+                x => bail!("Invalid start char '{x:#x}'"),
             }
         }
         if Instant::now() > timeout {
@@ -49,37 +49,34 @@ fn main() -> Result<()> {
         }
     }
 
-    println!();
     for (i, chunk) in data.chunks(1024).enumerate() {
         if i % 100 == 0 {
-            print!("\rSending {}/{}", i, (data.len() + 1023) / 1024);
+            print!("\rSending {i}/{} ", (data.len() + 1023) / 1024);
             std::io::stdout().flush()?;
         }
 
         let packet_num = (i + 1) as u8;
         let mut packet = vec![0x02, packet_num, 0xFF - packet_num];
 
-        let mut crc = 0u16;
-        for b in chunk.iter().chain(std::iter::repeat(&SUB)).take(1024) {
-            packet.push(*b);
-            crc = update_crc(*b, crc);
-        }
+        packet.extend(chunk.iter().chain(std::iter::repeat(&SUB)).take(1024));
 
-        crc = update_crc(0, update_crc(0, crc));
-        packet.push((crc >> 8) as u8);
-        packet.push(crc as u8);
+        let crc: u16 = packet[3..]
+            .iter()
+            .chain(&[0, 0]) // Two dummy bytes at the end
+            .fold(0, |crc, p| update_crc(*p, crc));
+        packet.extend_from_slice(&crc.to_be_bytes());
 
         device.write_all(&packet)?;
         device.flush()?;
 
-        let timeout = Instant::now() + Duration::new(1, 0);
+        let timeout = Instant::now() + Duration::from_secs(1);
         loop {
             let mut ack = [0u8];
             if device.read_exact(&mut ack).is_ok() {
                 match ack[0] {
                     ACK => break,
                     NAK => bail!("Got NAK"),
-                    e => bail!("Got invalid ACK/NAK '{e}'"),
+                    e => bail!("Got invalid ACK/NAK '{e:#x}'"),
                 }
             }
             if Instant::now() > timeout {
@@ -88,7 +85,7 @@ fn main() -> Result<()> {
         }
     }
     device.write_all(&[EOT])?;
-    println!("\nDONE");
+    println!("\nDone");
     Ok(())
 }
 
