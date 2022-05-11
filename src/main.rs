@@ -1,4 +1,5 @@
 use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use libftdi1_sys as ffi;
@@ -34,19 +35,24 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("Missing filename"))?;
     let data = std::fs::read(filename)?;
 
+    let timeout = Instant::now() + Duration::new(30, 0);
     loop {
-        let mut c = vec![0u8];
+        let mut c = [0u8];
         if device.read_exact(&mut c).is_ok() {
             match c[0] as char {
                 'C' => break,
-                c => bail!("Invalid start char '{}'", c),
+                x => bail!("Invalid start char '{}'", x),
             }
+        }
+        if Instant::now() > timeout {
+            bail!("Could not find initial `C`");
         }
     }
 
+    println!();
     for (i, chunk) in data.chunks(1024).enumerate() {
         if i % 100 == 0 {
-            print!(" Sending {}/{}\r", i, (data.len() + 1023) / 1024);
+            print!("\rSending {}/{}", i, (data.len() + 1023) / 1024);
             std::io::stdout().flush()?;
         }
 
@@ -60,27 +66,25 @@ fn main() -> Result<()> {
         }
 
         crc = update_crc(0, update_crc(0, crc));
-        packet.push((crc >> 8) as u8); // CRC
+        packet.push((crc >> 8) as u8);
         packet.push(crc as u8);
 
         device.write_all(&packet)?;
         device.flush()?;
 
-        let mut ack = [0u8];
-        let mut okay = false;
-        for _ in 0..1000 {
-            let _ = device.read_exact(&mut ack);
-            match ack[0] {
-                ACK => {
-                    okay = true;
-                    break;
+        let timeout = Instant::now() + Duration::new(1, 0);
+        loop {
+            let mut ack = [0u8];
+            if device.read_exact(&mut ack).is_ok() {
+                match ack[0] {
+                    ACK => break,
+                    NAK => bail!("Got NAK"),
+                    e => bail!("Got invalid ACK/NAK '{e}'"),
                 }
-                NAK => bail!("Got NAK"),
-                _ => continue, //bail!("Got unknown ack {}", i),
             }
-        }
-        if !okay {
-            bail!("Missed ACK");
+            if Instant::now() > timeout {
+                bail!("Timed out while waiting for ACK/NAK");
+            }
         }
     }
     device.write_all(&[EOT])?;
