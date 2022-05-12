@@ -1,40 +1,18 @@
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, bail, Result};
-use libftdi1_sys as ffi;
+use anyhow::{bail, Context, Result};
+use clap::Parser;
+
+mod dummy;
+mod ftdi;
 
 const ACK: u8 = 0x06;
 const NAK: u8 = 0x15;
 const SUB: u8 = 0x1A;
 const EOT: u8 = 0x04;
 
-fn main() -> Result<()> {
-    let mut device = ftdi::find_by_vid_pid(0x0403, 0x6011)
-        .interface(ftdi::Interface::A)
-        .open()?;
-
-    device.usb_reset()?;
-    device.configure(
-        ftdi::Bits::Eight,
-        ftdi::StopBits::One,
-        ftdi::Parity::None,
-    )?;
-    device.usb_purge_buffers()?;
-    device.set_baud_rate(3_000_000)?;
-    device.set_latency_timer(1)?;
-    device.set_flow_control(ftdi::FlowControl::RtsCts)?;
-    device.set_bitmode(0xFF, ftdi::BitMode::Reset)?;
-
-    if unsafe { ffi::ftdi_setdtr_rts(device.libftdi_context(), 1, 1) } != 0 {
-        bail!("Could not set DTR / RTS");
-    }
-
-    let filename = std::env::args()
-        .nth(1)
-        .ok_or_else(|| anyhow!("Missing filename"))?;
-    let data = std::fs::read(filename)?;
-
+fn run<D: Read + Write>(mut device: D, data: &[u8]) -> Result<()> {
     let timeout = Instant::now() + Duration::from_secs(30);
     loop {
         let mut c = [0u8];
@@ -87,6 +65,28 @@ fn main() -> Result<()> {
     device.write_all(&[EOT])?;
     println!("\nDone");
     Ok(())
+}
+
+/// Simple XMODEM sender
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+    /// Use a dummy backend
+    #[clap(short, long)]
+    dummy: bool,
+
+    filename: String,
+}
+
+fn main() -> Result<()> {
+    let args = Args::parse();
+    let data = std::fs::read(&args.filename)
+        .context(format!("Could not open file '{}' to send", args.filename))?;
+    if args.dummy {
+        run(dummy::new(), &data)
+    } else {
+        run(ftdi::new()?, &data)
+    }
 }
 
 /* crctab calculated by Mark G. Mendel, Network Systems Corporation */
