@@ -1,7 +1,55 @@
-use anyhow::{bail, Result};
+use std::io::{ErrorKind, Read, Result, Write};
+use std::time::{Duration, Instant};
+
+use anyhow::bail;
 use libftdi1_sys as ffi;
 
-pub fn new() -> Result<ftdi::Device> {
+const TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Handle which wraps an FTDI device and adds retries / timeouts
+pub struct Device(ftdi::Device, usize);
+
+impl Read for Device {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        let timeout = Instant::now() + TIMEOUT;
+        let mut i = 0;
+
+        while i < buf.len() {
+            if let Ok(d) = self.0.read(&mut buf[i..]) {
+                i += d;
+            }
+            if Instant::now() > timeout {
+                return Err(ErrorKind::TimedOut.into());
+            }
+        }
+        Ok(i)
+    }
+}
+
+impl Write for Device {
+    fn write(&mut self, buf: &[u8]) -> Result<usize> {
+        let timeout = Instant::now() + TIMEOUT;
+        let mut i = 0;
+
+        while i < buf.len() {
+            match self.0.write(&buf[i..]) {
+                Ok(d) => i += d,
+                Err(_) => continue,
+            }
+            if Instant::now() > timeout {
+                return Err(ErrorKind::TimedOut.into());
+            }
+        }
+        Ok(i)
+    }
+    fn flush(&mut self) -> Result<()> {
+        self.0.flush()
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+pub fn new() -> anyhow::Result<Device> {
     let mut device = ftdi::find_by_vid_pid(0x0403, 0x6011)
         .interface(ftdi::Interface::A)
         .open()?;
@@ -20,5 +68,5 @@ pub fn new() -> Result<ftdi::Device> {
     if unsafe { ffi::ftdi_setdtr_rts(device.libftdi_context(), 1, 1) } != 0 {
         bail!("Could not set DTR / RTS");
     }
-    Ok(device)
+    Ok(Device(device, 0))
 }

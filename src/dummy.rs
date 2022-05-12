@@ -1,5 +1,7 @@
 use std::io::{Read, Result, Write};
 
+use crate::ACK;
+
 pub enum Dummy {
     Start,
     Running,
@@ -16,7 +18,7 @@ impl Read for Dummy {
         }
         match self {
             Self::Start => buf[0] = b'C',
-            Self::Running => buf[0] = crate::ACK,
+            Self::Running => buf[0] = ACK,
         }
         Ok(1)
     }
