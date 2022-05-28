@@ -9,12 +9,17 @@ mod progress;
 
 const ACK: u8 = 0x06;
 
-fn run<D: Read + Write, W: Read>(dev: D, mut stream: W) -> Result<usize> {
+fn run<D: Read + Write>(dev: D, filename: &str) -> Result<usize> {
+    let mut file = std::fs::File::open(filename)
+        .context(format!("Could not open file '{}' to send", filename))?;
+    let blocks = (file.metadata().unwrap().len() + 1023) / 1024;
+
+    // Wrap the device in a snazzy progress bar
+    let mut dev = progress::Progress::new(dev, blocks);
+
     let mut x = xmodem::Xmodem::new();
     x.block_length = xmodem::BlockLength::OneK;
-    let mut dev = progress::Progress::new(dev);
-    x.send(&mut dev, &mut stream)
-        .map_err(|e| anyhow!("{:?}", e))
+    x.send(&mut dev, &mut file).map_err(|e| anyhow!("{:?}", e))
 }
 
 /// Simple XMODEM sender
@@ -30,12 +35,11 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let file = std::fs::File::open(&args.filename)
-        .context(format!("Could not open file '{}' to send", args.filename))?;
+
     if args.dummy {
-        run(dummy::new(), &file)
+        run(dummy::new(), &args.filename)
     } else {
-        run(ftdi::new()?, &file)
+        run(ftdi::new()?, &args.filename)
     }?;
     Ok(())
 }
