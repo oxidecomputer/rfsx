@@ -11,4 +11,5 @@ clap = { version = "3", features = ["derive"] }
 ftdi = "0.1"
 indicatif = "0.16"
 libftdi1-sys = "1"
+parse_int = "0.6.0"
 xmodem = { git = "https://github.com/oxidecomputer/xmodem.rs/" }

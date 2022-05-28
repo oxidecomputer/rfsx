@@ -49,10 +49,11 @@ impl Write for Device {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-pub fn new() -> anyhow::Result<Device> {
-    let mut device = ftdi::find_by_vid_pid(0x0403, 0x6011)
-        .interface(ftdi::Interface::A)
-        .open()?;
+pub fn new(vid: Option<u16>, pid: Option<u16>) -> anyhow::Result<Device> {
+    let mut device =
+        ftdi::find_by_vid_pid(vid.unwrap_or(0x0403), pid.unwrap_or(0x6011))
+            .interface(ftdi::Interface::A)
+            .open()?;
 
     device.usb_reset()?;
     device.configure(

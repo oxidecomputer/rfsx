@@ -30,6 +30,16 @@ struct Args {
     #[clap(short, long)]
     dummy: bool,
 
+    /// Vendor ID of USB device
+    #[clap(short, long, conflicts_with = "dummy",
+           parse(try_from_str=parse_int::parse))]
+    vid: Option<u16>,
+
+    /// Product ID of USB device
+    #[clap(short, long, conflicts_with = "dummy",
+           parse(try_from_str=parse_int::parse))]
+    pid: Option<u16>,
+
     filename: String,
 }
 
@@ -39,7 +49,7 @@ fn main() -> Result<()> {
     if args.dummy {
         run(dummy::new(), &args.filename)
     } else {
-        run(ftdi::new()?, &args.filename)
+        run(ftdi::new(args.vid, args.pid)?, &args.filename)
     }?;
     Ok(())
 }
